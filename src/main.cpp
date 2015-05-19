@@ -26,6 +26,7 @@ KSEQ_INIT(gzFile, gzread)
 #include "Inspect.h"
 #include "Bootstrap.h"
 #include "H5Writer.h"
+#include "ShowAlignments.h"
 
 
 //#define ERROR_STR "\033[1mError:\033[0m"
@@ -290,6 +291,65 @@ void ParseOptionsH5Dump(int argc, char **argv, ProgramOptions& opt) {
   }
 }
 
+/**
+ * Added to see where alignment land
+ */
+void ParseOptionsAlignment(int argc, char **argv, ProgramOptions& opt) {
+  int verbose_flag = 0;
+  int plaintext_flag = 0;
+  int write_index_flag = 0;
+  int single_flag = 0;
+
+  const char *opt_string = "i:l:";
+  static struct option long_options[] = {
+          // long args
+          {"verbose", no_argument, &verbose_flag, 1},
+          {"single", no_argument, &single_flag, 1},
+          // short args
+          {"index", required_argument, 0, 'i'},
+          {"fragment-length", required_argument, 0, 'l'},
+          {0,0,0,0}
+  };
+  int c;
+  int option_index = 0;
+  while (true) {
+    c = getopt_long(argc,argv,opt_string, long_options, &option_index);
+
+    if (c == -1) {
+      break;
+    }
+
+    switch (c) {
+      case 0:
+        break;
+      case 'i': {
+        opt.index = optarg;
+        break;
+      }
+      case 'l': {
+        stringstream(optarg) >> opt.fld;
+        break;
+      }
+      default: break;
+    }
+  }
+
+  // all other arguments are fast[a/q] files to be read
+  for (int i = optind; i < argc; i++) {
+    opt.files.push_back(argv[i]);
+  }
+
+  if (verbose_flag) {
+    opt.verbose = true;
+  }
+
+  if (single_flag) {
+    opt.single_end = true;
+  }
+}
+
+
+
 bool CheckOptionsIndex(ProgramOptions& opt) {
 
   bool ret = true;
@@ -527,6 +587,69 @@ bool CheckOptionsH5Dump(ProgramOptions& opt) {
   return ret;
 }
 
+/**
+ * Added for alignment
+ */
+bool CheckOptionsAlignment(ProgramOptions& opt) {
+
+  bool ret = true;
+
+  cerr << endl;
+  // check for index
+  if (opt.index.empty()) {
+    cerr << ERROR_STR << " kallisto index file missing" << endl;
+    ret = false;
+  } else {
+    struct stat stFileInfo;
+    auto intStat = stat(opt.index.c_str(), &stFileInfo);
+    if (intStat != 0) {
+      cerr << ERROR_STR << " kallisto index file not found " << opt.index << endl;
+      ret = false;
+    }
+  }
+
+  // check for read files
+    if (opt.files.size() == 0) {
+      cerr << ERROR_STR << " Missing read files" << endl;
+      ret = false;
+    } else {
+      struct stat stFileInfo;
+      for (auto& fn : opt.files) {
+        auto intStat = stat(fn.c_str(), &stFileInfo);
+        if (intStat != 0) {
+          cerr << ERROR_STR << " file not found " << fn << endl;
+          ret = false;
+        }
+      }
+
+    if (!opt.single_end) {
+      if (opt.files.size() % 2 != 0) {
+        cerr << "Error: paired-end mode requires an even number of input files" << endl
+        << "       (use --single for processing single-end reads)" << endl;
+        ret = false;
+      }
+    }
+  }
+
+  if (opt.single_end && opt.fld == 0.0) {
+    cerr << "Error: average fragment length must be supplied for single-end reads using -l" << endl;
+    ret = false;
+  } else if (opt.fld == 0.0 && ret) {
+    // In the future, if we have single-end data we should require this
+    // argument
+    cerr << "[quant] fragment length distribution will be estimated from the data" << endl;
+
+  }
+
+  if (opt.fld < 0.0) {
+    cerr << "Error: invalid value for average fragment length " << opt.fld << endl;
+    ret = false;
+  }
+
+  return ret;
+}
+
+
 void PrintCite() {
   cout << "The paper describing this software has not been published." << endl;
   //  cerr << "When using this program in your research, please cite" << endl << endl;
@@ -540,7 +663,9 @@ void usage() {
   cout << "kallisto " << KALLISTO_VERSION << endl << endl
        << "Usage: kallisto <CMD> [arguments] .." << endl << endl
        << "Where <CMD> can be one of:" << endl << endl
+       << "    align         Show where alignments occur "<< endl << endl
        << "    index         Builds a kallisto index "<< endl
+       << "    inspect       Shows information about kallisto index "<< endl
        << "    quant         Runs the quantification algorithm " << endl
        << "    h5dump        Converts HDF5-formatted results to plaintext" << endl
        << "    version       Prints version information"<< endl << endl
@@ -604,6 +729,23 @@ void usageEMOnly() {
        << "-b, --bootstrap-samples=INT   Number of bootstrap samples (default: 0)" << endl
        << "    --seed=INT                Seed for the bootstrap sampling (default: 42)" << endl
        << "    --plaintext               Output plaintext instead of HDF5" << endl << endl;
+}
+
+void usageAlignment(bool valid_input = true) {
+  if (valid_input) {
+
+    cout << "kallisto " << KALLISTO_VERSION << endl
+    << "Shows alignments" << endl << endl;
+  }
+  cout << "Usage: kallisto align [arguments] FASTQ-files" << endl << endl
+  << "Required arguments:" << endl
+  << "-i, --index=STRING            Filename for the kallisto index to be used for" << endl
+  << "                              quantification" << endl
+  << "Optional arguments:" << endl
+  << "    --single                  Quantify single-end reads" << endl
+  << "-l, --fragment-length=DOUBLE  Estimated average fragment length" << endl
+  << "                              (default: value is estimated from the input data)" << endl << endl;
+
 }
 
 std::string argv_to_string(int argc, char *argv[]) {
@@ -852,6 +994,24 @@ int main(int argc, char *argv[]) {
         h5conv.write_aux();
         h5conv.convert();
       }
+    } else if (cmd == "align") {
+      if (argc==2) {
+        usageAlignment();
+        return 0;
+      }
+      ParseOptionsAlignment(argc-1,argv+1,opt);
+      if (!CheckOptionsAlignment(opt)) {
+        cerr << endl;
+        usageAlignment(false);
+        exit(1);
+      } else {
+        KmerIndex index(opt);
+        index.load(opt);
+
+        MinCollector collection(index, opt);
+        ShowAlignments<KmerIndex, MinCollector>(index, opt, collection);
+      }
+
     }  else {
       cerr << "Error: invalid command " << cmd << endl;
       usage();
