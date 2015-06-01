@@ -10,6 +10,7 @@ struct ProgramOptions {
   bool verbose;
   int threads;
   std::string index;
+  std::string alignment;
   int k;
   int iterations;
   std::string output;
@@ -22,6 +23,7 @@ struct ProgramOptions {
   std::vector<std::string> files;
   bool plaintext;
   bool write_index;
+  bool ec;
   bool single_end;
   bool peek; // only used for H5Dump
 
@@ -37,6 +39,7 @@ ProgramOptions() :
   bootstrap(0),
   plaintext(false),
   write_index(false),
+  ec(false),
   single_end(false),
   peek(false)
   {}

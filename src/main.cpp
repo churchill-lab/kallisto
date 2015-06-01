@@ -26,7 +26,7 @@ KSEQ_INIT(gzFile, gzread)
 #include "Inspect.h"
 #include "Bootstrap.h"
 #include "H5Writer.h"
-#include "ShowAlignments.h"
+#include "AlignmentIndex.h"
 
 
 //#define ERROR_STR "\033[1mError:\033[0m"
@@ -299,13 +299,16 @@ void ParseOptionsAlignment(int argc, char **argv, ProgramOptions& opt) {
   int plaintext_flag = 0;
   int write_index_flag = 0;
   int single_flag = 0;
+  int ec_flag = 0;
 
-  const char *opt_string = "i:l:";
+  const char *opt_string = "a:i:l:";
   static struct option long_options[] = {
           // long args
           {"verbose", no_argument, &verbose_flag, 1},
           {"single", no_argument, &single_flag, 1},
+          {"ec", no_argument, &ec_flag, 1},
           // short args
+          {"alignment", required_argument, 0, 'a'},
           {"index", required_argument, 0, 'i'},
           {"fragment-length", required_argument, 0, 'l'},
           {0,0,0,0}
@@ -324,6 +327,10 @@ void ParseOptionsAlignment(int argc, char **argv, ProgramOptions& opt) {
         break;
       case 'i': {
         opt.index = optarg;
+        break;
+      }
+      case 'a': {
+        opt.alignment = optarg;
         break;
       }
       case 'l': {
@@ -346,8 +353,70 @@ void ParseOptionsAlignment(int argc, char **argv, ProgramOptions& opt) {
   if (single_flag) {
     opt.single_end = true;
   }
+
+  if (ec_flag) {
+    opt.ec = true;
+  }
 }
 
+/**
+ * Added to see where alignment land
+ */
+void ParseOptionsAlignmentRead(int argc, char **argv, ProgramOptions& opt) {
+  int verbose_flag = 0;
+  int plaintext_flag = 0;
+  int write_index_flag = 0;
+  int single_flag = 0;
+  int ec_flag = 0;
+
+  const char *opt_string = "a:l:";
+  static struct option long_options[] = {
+          // long args
+          {"verbose", no_argument, &verbose_flag, 1},
+          {"single", no_argument, &single_flag, 1},
+          {"ec", no_argument, &ec_flag, 1},
+          // short args
+          {"alignment", required_argument, 0, 'a'},
+          {"fragment-length", required_argument, 0, 'l'},
+          {0,0,0,0}
+  };
+  int c;
+  int option_index = 0;
+  while (true) {
+    c = getopt_long(argc,argv,opt_string, long_options, &option_index);
+
+    if (c == -1) {
+      break;
+    }
+
+    switch (c) {
+      case 0:
+        break;
+      case 'a': {
+        opt.alignment = optarg;
+        break;
+      }
+      case 'l': {
+        stringstream(optarg) >> opt.fld;
+        break;
+      }
+      default: break;
+    }
+  }
+
+  if (verbose_flag) {
+    opt.verbose = true;
+  }
+
+  if (single_flag) {
+    opt.single_end = true;
+  }
+
+  if (ec_flag) {
+    opt.ec = true;
+  }
+
+}
 
 
 bool CheckOptionsIndex(ProgramOptions& opt) {
@@ -649,6 +718,44 @@ bool CheckOptionsAlignment(ProgramOptions& opt) {
   return ret;
 }
 
+/**
+ * Added for alignment
+ */
+bool CheckOptionsAlignmentRead(ProgramOptions& opt) {
+
+  bool ret = true;
+
+  cerr << endl;
+  // check for alignment
+  if (opt.alignment.empty()) {
+    cerr << ERROR_STR << " kb alignment file missing" << endl;
+    ret = false;
+  } else {
+    struct stat stFileInfo;
+    auto intStat = stat(opt.alignment.c_str(), &stFileInfo);
+    if (intStat != 0) {
+      cerr << ERROR_STR << " kb alignment file not found " << opt.index << endl;
+      ret = false;
+    }
+  }
+
+  if (opt.single_end && opt.fld == 0.0) {
+    cerr << "Error: average fragment length must be supplied for single-end reads using -l" << endl;
+    ret = false;
+  } else if (opt.fld == 0.0 && ret) {
+    // In the future, if we have single-end data we should require this
+    // argument
+    cerr << "[quant] fragment length distribution will be estimated from the data" << endl;
+
+  }
+
+  if (opt.fld < 0.0) {
+    cerr << "Error: invalid value for average fragment length " << opt.fld << endl;
+    ret = false;
+  }
+
+  return ret;
+}
 
 void PrintCite() {
   cout << "The paper describing this software has not been published." << endl;
@@ -663,7 +770,7 @@ void usage() {
   cout << "kallisto " << KALLISTO_VERSION << endl << endl
        << "Usage: kallisto <CMD> [arguments] .." << endl << endl
        << "Where <CMD> can be one of:" << endl << endl
-       << "    align         Show where alignments occur "<< endl << endl
+       << "    align         Show where alignments occur "<< endl
        << "    index         Builds a kallisto index "<< endl
        << "    inspect       Shows information about kallisto index "<< endl
        << "    quant         Runs the quantification algorithm " << endl
@@ -735,12 +842,29 @@ void usageAlignment(bool valid_input = true) {
   if (valid_input) {
 
     cout << "kallisto " << KALLISTO_VERSION << endl
-    << "Shows alignments" << endl << endl;
+    << "Constructs alignments" << endl << endl;
   }
   cout << "Usage: kallisto align [arguments] FASTQ-files" << endl << endl
   << "Required arguments:" << endl
-  << "-i, --index=STRING            Filename for the kallisto index to be used for" << endl
-  << "                              quantification" << endl
+  << "-i, --index=STRING            Filename for the kallisto index to be used" << endl
+  << "-a, --alignment=STRING        Filename for the kb alignment file" << endl << endl
+  << "Optional arguments:" << endl
+  << "    --reads                   Writes alignment file for reads, otherwise for equivalence class" << endl
+  << "    --single                  Quantify single-end reads" << endl
+  << "-l, --fragment-length=DOUBLE  Estimated average fragment length" << endl
+  << "                              (default: value is estimated from the input data)" << endl << endl;
+
+}
+
+void usageAlignmentRead(bool valid_input = true) {
+  if (valid_input) {
+
+    cout << "kallisto " << KALLISTO_VERSION << endl
+    << "Reads alignments" << endl << endl;
+  }
+  cout << "Usage: kallisto alignread [arguments]" << endl << endl
+  << "Required arguments:" << endl
+  << "-a, --alignment=STRING        Filename for the kb alignment file" << endl << endl
   << "Optional arguments:" << endl
   << "    --single                  Quantify single-end reads" << endl
   << "-l, --fragment-length=DOUBLE  Estimated average fragment length" << endl
@@ -1009,7 +1133,22 @@ int main(int argc, char *argv[]) {
         index.load(opt);
 
         MinCollector collection(index, opt);
-        ShowAlignments<KmerIndex, MinCollector>(index, opt, collection);
+        createAlignments(index, opt, collection);
+
+      }
+
+    } else if (cmd == "alignread") {
+      if (argc==2) {
+        usageAlignmentRead();
+        return 0;
+      }
+      ParseOptionsAlignmentRead(argc-1,argv+1,opt);
+      if (!CheckOptionsAlignmentRead(opt)) {
+        cerr << endl;
+        usageAlignmentRead(false);
+        exit(1);
+      } else {
+        loadAlignments(opt);
       }
 
     }  else {
